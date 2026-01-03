@@ -1,0 +1,8 @@
+name: sim
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy>=1.23
+  - matplotlib>=3.6
+  - pip
