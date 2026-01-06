@@ -27,6 +27,15 @@ from src.dynamics.control import (
 )
 from src.planning.path import make_straight_lane_path, make_lane_change_path
 
+    
+def ideal_perception(state, step):
+    return {
+        "need_lane_change": step == 80,
+        "lane_change_done": step == 160, 
+        "approaching_intersection": step ==240,
+        "turn_done": step == 320,
+    }
+    
 def main():
     # --- BEV window bounds (meters) ---
     xlim = (-50.0, 100.0)
@@ -65,13 +74,17 @@ def main():
     traj = [(state.x, state.y)]
 
     for k in range(steps):
+        perception = ideal_perception(state, k)
+        drive_state, ref_path = planner.update(state, perception)
+        ref_path = np.array(ref_path)
+        
         # Errors (Pass/Fail #2)
         idx_near, _, _ = nearest_point_on_path(ref_path, state.x, state.y)
         e_lat = signed_lateral_error(state, ref_path, idx_near)
         e_head = heading_error(state, ref_path, idx_near)
 
         # Steering control (Pass/Fail #3)
-        delta, dbg = pure_pursuit_steer(state, ref_path, vparams, cparams)
+        delta, _ = pure_pursuit_steer(state, ref_path, vparams, cparams)
 
         # Speed control (Pass/Fail #4)
         a = speed_control(state.v, v_ref, vparams, cparams)

@@ -13,7 +13,9 @@ def main():
     K = CameraIntrinsics(
         fx=900, fy=900,
         cx=640, cy=360,
-        width=1280, height=720
+        width=1280, height=720,
+        # distortion=(k0,k1,k2,k3,k4),
+        # undistortion=(u0,u1,u2,u3,u4),
     )
 
     T_cam_world = make_T_cam_world()
@@ -45,3 +47,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# camera model pinhole with no distortion
+# -> distortion, undistortion
+# -> fisheye
+
+# camera extrinsic
+# -> x,y,z,roll,pitch,yaw
+
+# map (world)
+# -> lane
+# -> traffic (car -> 선행차량/ 아닌차량, human -> 도로 위에 있는 사람, sidewalk 에 있는 사람)
+# perception model -> tracking trajectory 인지 모듈, ..... (다양)
+# -> crosswalk, traffic sign, stopline ( -> path planning에서 중요하게 보는 인지 입력)
+# perception model -> 신호등이랑 정지선같이 법규적으로 인지가능한 signal들을 인지하는 모듈,....
+
+# reference path 생성 -> planning 할 때 perception 출력을 사용함.
+# v2x 로 신호등 신호 받아오기도 함. (서울시청 신호등 정보 실시간으로 통신해서 signal 주세요.)
