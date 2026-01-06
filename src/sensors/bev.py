@@ -15,6 +15,14 @@ def world_xy_to_bev(points_world, xlim, ylim, bev_size):
 
 def clip_bev(bev_uv, bev_size):
     W, H = bev_size
-    u, v = bev_uv[:,0], bev_uv[:,1]
-    mask = (u>=0)&(u<W)&(v>=0)&(v<H)
-    return bev_uv[mask]
+    bev_uv = np.asarray(bev_uv, dtype=float)
+
+    u = bev_uv[:, 0]
+    v = bev_uv[:, 1]
+
+    nan_mask = np.isnan(u) | np.isnan(v)
+    in_mask = (u >= 0) & (u < W) & (v >= 0) & (v < H)
+
+    # NaN은 무조건 살리고, 정상 점은 화면 안에 있는 것만 살림
+    keep = nan_mask | in_mask
+    return bev_uv[keep]

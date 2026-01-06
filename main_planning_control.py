@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import numpy as np
+
+# from bev
+from src.sensors.bev import world_xy_to_bev, clip_bev
+
+# from map
+from src.world.world import make_demo_world_points
+
+# from planning
+from src.planning.planner import Planner, DriveState
+
+# from kinetic bicycle model
+from src.dynamics.vehicle import VehicleState, VehicleParams, step_kinematic_bicycle
+
+from main_viewer import show_bev_viewer
+
+# from control
+from src.dynamics.control import (
+    ControlParams,
+    nearest_point_on_path,
+    signed_lateral_error,
+    heading_error,
+    pure_pursuit_steer,
+    speed_control
+)
+from src.planning.path import make_straight_lane_path, make_lane_change_path
+
+def main():
+    # --- BEV window bounds (meters) ---
+    xlim = (-50.0, 100.0)
+    ylim = (-20.0, 20.0)
+    bev_size = (900, 600)
+
+    # --- World (Day1 demo map points) ---
+    world_pts = make_demo_world_points()
+
+    bev_dict = {}
+    for name, pts3 in world_pts.items():
+        bev_uv = world_xy_to_bev(pts3, xlim=xlim, ylim=ylim, bev_size=bev_size)
+        bev_uv = clip_bev(bev_uv, bev_size)
+        bev_dict[name] = bev_uv
+
+    # --- planner ---
+    planner = Planner()
+    
+    # --- Reference path ---
+    ref_path = make_straight_lane_path(x_start=0.0, x_end=80.0, y=0.0)
+    # ref_path = make_lane_change_path(x_start=0.0, x_end=80.0, y0=0.0, y1=3.5, x_change_start=20.0, x_change_end=40.0)
+
+    # --- Vehicle and controllers ---
+    vparams = VehicleParams(wheelbase=2.8)
+    cparams = ControlParams(lookahead_base=4.0, lookahead_gain=0.25, k_speed=0.8)
+
+    state = VehicleState(x=0.0, y=-1.0, yaw=np.deg2rad(0.0), v=0.0)
+    v_ref = 10.0  # m/s
+
+    # --- Simulation loop ---
+    dt = 0.05
+    T = 20.0
+    steps = int(T / dt)
+
+    states=[state]
+    traj = [(state.x, state.y)]
+
+    for k in range(steps):
+        # Errors (Pass/Fail #2)
+        idx_near, _, _ = nearest_point_on_path(ref_path, state.x, state.y)
+        e_lat = signed_lateral_error(state, ref_path, idx_near)
+        e_head = heading_error(state, ref_path, idx_near)
+
+        # Steering control (Pass/Fail #3)
+        delta, dbg = pure_pursuit_steer(state, ref_path, vparams, cparams)
+
+        # Speed control (Pass/Fail #4)
+        a = speed_control(state.v, v_ref, vparams, cparams)
+
+        # Vehicle update (Pass/Fail #1)
+        state = step_kinematic_bicycle(state, delta, a, dt, vparams)
+        states.append(state)
+        traj.append((state.x, state.y))
+    
+    show_bev_viewer(
+        bev_dict=bev_dict,
+        bev_size=bev_size,
+        xlim=xlim,
+        ylim=ylim,
+        ref_path_xy=ref_path,
+        states=states,
+        traj_xy_list=traj,
+        world_pts=world_pts,
+        title="Dynamics & Control BEV Viewer"
+    )
+if __name__ == "__main__":
+    main()
