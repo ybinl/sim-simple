@@ -6,4 +6,4 @@ simple version of autonomous driving simulation engine.
 ### 2. Create environment from `environment.yml`
 '''bash
 conda env creat -f environment.yml
-conda activate ad_sim
+conda activate sim

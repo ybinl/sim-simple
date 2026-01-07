@@ -28,8 +28,12 @@ from src.dynamics.control import (
 from src.planning.path import make_straight_lane_path, make_lane_change_path
 
     
-def ideal_perception(state, step):
-    return {
+def ideal_perception(state, object_box_result, step):
+    
+    # object_box_result는 카메라 센서 로직에서 검출된 장애물의 위치
+    # object_box 는 (x,y,0) center point가 검출되서 perception으로 들어옴
+        
+    return {       "object_box_result": object_box_result,
         "need_lane_change": step == 80,
         "lane_change_done": step == 160, 
         "approaching_intersection": step ==240,
@@ -72,10 +76,15 @@ def main():
 
     states=[state]
     traj = [(state.x, state.y)]
-
+    
+    # map (world) 에 존재하는 장애물을 그대로 입력 받았다고 가정.
+    obj_detection = world_pts.get("car_box", None)
+    obj_2d = np.mean(obj_detection, axis=0)[:2]
     for k in range(steps):
-        perception = ideal_perception(state, k)
+        perception = ideal_perception(state, obj_2d, k)
         drive_state, ref_path = planner.update(state, perception)
+        
+        # ref_path 를 제어 모듈이 받아서 사용함. planner 가 ref_path를 만들어줌
         ref_path = np.array(ref_path)
         
         # Errors (Pass/Fail #2)
