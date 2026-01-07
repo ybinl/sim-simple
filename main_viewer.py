@@ -12,6 +12,18 @@ from src.common.types import CameraIntrinsics
 # from kinetic bicycle model
 from src.dynamics.vehicle import VehicleState, VehicleParams, step_kinematic_bicycle
 
+COLORS = {
+    "lane_left": "gold",
+    "lane_center": "black",
+    "lane_right": "deepskyblue",
+
+    "car_box": "lime",
+
+    "stop_line": "red",
+    "crosswalk": "orange",
+    "crosswalk_stripes": "orange",   # stripes도 동일 계열
+}
+DEFAULT_COLOR = "gray"
 
 def make_T_vehicle_world(state: VehicleState):
     """
@@ -54,13 +66,7 @@ def show_bev_viewer(
         """Order 2D points counter-clockwise around centroid."""
         c = pts_uv.mean(axis=0)
         ang = np.arctan2(pts_uv[:,1] - c[1], pts_uv[:,0] - c[0])
-        return pts_uv[np.argsort(ang)]
-
-    LANE_COLORS = {
-        "lane_left": "gold",
-        "lane_center": "black",
-        "lane_right": "deepskyblue",
-    }    
+        return pts_uv[np.argsort(ang)]  
     
     W, H = bev_size
 
@@ -84,30 +90,32 @@ def show_bev_viewer(
     ax.grid(True)
 
 
-    # --- draw static map (lanes as solid lines, car_box as rectangle) ---
-    for k, uv in bev_dict.items():
-        if k in ("lane_left", "lane_center", "lane_right"):
-            # solid line
-            col = LANE_COLORS.get(k, "gray")
-            ax.plot(uv[:, 0], uv[:, 1], linewidth=2.5, label=k, color=col)
-        elif k == "car_box":
-            # car_box points are corners of ONE car (not 4 cars)
-            # If 8 points exist (bottom+top), take bottom 4 (first 4 in our demo generation)
-            car_uv = uv
-            if car_uv.shape[0] >= 4:
-                bottom4 = car_uv[:4].copy()  # assumes first 4 are dz=0
-                bottom4 = _order_polygon_ccw(bottom4)
-                poly = np.vstack([bottom4, bottom4[0]])  # close loop
-                ax.plot(poly[:, 0], poly[:, 1], linewidth=2.5, color="lime", label="car_box(rect)")
-            else:
-                ax.scatter(car_uv[:, 0], car_uv[:, 1], s=30, label="car_box")
-        else:
-            ax.scatter(uv[:, 0], uv[:, 1], s=3, label=k)
+    for k, uv_list in bev_dict.items():
+        if uv_list is None:
+            continue
 
-    
-    # # draw static map points (once)
-    # for k, uv in bev_dict.items():
-    #     ax.scatter(uv[:, 0], uv[:, 1], s=3, label=k)
+        col = COLORS.get(k, DEFAULT_COLOR)
+
+        for uv in uv_list:
+            if k in ("lane_left", "lane_center", "lane_right"):
+                ax.plot(uv[:, 0], uv[:, 1], linewidth=2.5, color=col)
+
+            elif k == "car_box":
+                car_uv = uv
+                if car_uv.shape[0] >= 4:
+                    bottom4 = car_uv[:4].copy()
+                    bottom4 = _order_polygon_ccw(bottom4)
+                    poly = np.vstack([bottom4, bottom4[0]])
+                    ax.plot(poly[:, 0], poly[:, 1], linewidth=2.5, color=col)
+                else:
+                    ax.scatter(car_uv[:, 0], car_uv[:, 1], s=30, color=col)
+
+            elif k in ("crosswalk", "crosswalk_stripes", "stop_line"):
+                ax.plot(uv[:, 0], uv[:, 1], linewidth=2.0, color=col)
+
+            else:
+                ax.scatter(uv[:, 0], uv[:, 1], s=6, color=col)
+
 
     # draw static reference path (once)
     ref_uv = []
@@ -139,13 +147,6 @@ def show_bev_viewer(
     ax_cam.set_xlabel("u [px]")
     ax_cam.set_ylabel("v [px]")
     ax_cam.grid(True)
-
-    CAM_COLORS = {
-        "lane_left": "gold",
-        "lane_center": "black",
-        "lane_right": "deepskyblue",
-        "car_box": "lime",
-    }
 
     cam_artists = []  # frame마다 지우고 다시 그림
 
@@ -185,13 +186,24 @@ def show_bev_viewer(
 
         T_cam_world = make_T_cam_world() @ make_T_vehicle_world(s)
 
-        for name, pts3 in world_pts.items():
-            uv, _ = project_pinhole(pts3, T_cam_world, K)
-            if uv.shape[0] == 0:
+        for name, pts_list in world_pts.items():
+            if pts_list is None:
                 continue
-            col = CAM_COLORS.get(name, "gray")
-            sc = ax_cam.scatter(uv[:, 0], uv[:, 1], s=6, color=col, label=name)
-            cam_artists.append(sc)
+
+            col = COLORS.get(name, DEFAULT_COLOR)
+
+            for pts3 in pts_list:
+                uv, _ = project_pinhole(pts3, T_cam_world, K)
+                if uv.shape[0] == 0:
+                    continue
+
+                if name in ("crosswalk", "crosswalk_stripes", "stop_line"):
+                    ln, = ax_cam.plot(uv[:, 0], uv[:, 1], linewidth=2.0, color=col)
+                    cam_artists.append(ln)
+                else:
+                    sc = ax_cam.scatter(uv[:, 0], uv[:, 1], s=6, color=col)
+                    cam_artists.append(sc)
+
 
         # legend 중복 방지: 매 프레임 새로 갱신
         if len(cam_artists) > 0:

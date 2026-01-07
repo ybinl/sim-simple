@@ -6,7 +6,7 @@ import numpy as np
 from src.sensors.bev import world_xy_to_bev, clip_bev
 
 # from map
-from src.world.world import make_demo_world_points
+from src.world.world import make_demo_world_points, make_pangyo_world_pts
 
 # from planning
 from src.planning.planner import Planner, DriveState
@@ -27,13 +27,45 @@ from src.dynamics.control import (
 )
 from src.planning.path import make_straight_lane_path, make_lane_change_path
 
+def normalize_items_to_polylines(items):
+    """
+    items can be:
+      - List[np.ndarray] where each is (Ni,2/3)
+      - np.ndarray (N,2/3)  -> treated as one polyline
+      - np.ndarray (3,)     -> treated as one point polyline (1,3)
+    returns: List[np.ndarray]
+    """
+    if items is None:
+        return []
+
+    # List: already multiple polylines (or points)
+    if isinstance(items, list):
+        out = []
+        for a in items:
+            if a is None:
+                continue
+            arr = np.asarray(a)
+            if arr.ndim == 1 and arr.shape[0] >= 2:
+                arr = arr.reshape(1, -1)
+            if arr.ndim == 2 and arr.shape[1] >= 2 and len(arr) > 0:
+                out.append(arr)
+        return out
+
+    # ndarray
+    arr = np.asarray(items)
+    if arr.ndim == 1 and arr.shape[0] >= 2:
+        return [arr.reshape(1, -1)]
+    if arr.ndim == 2 and arr.shape[1] >= 2:
+        return [arr]
+
+    return []
     
 def ideal_perception(state, object_box_result, step):
     
     # object_box_result는 카메라 센서 로직에서 검출된 장애물의 위치
     # object_box 는 (x,y,0) center point가 검출되서 perception으로 들어옴
         
-    return {       "object_box_result": object_box_result,
+    return {     "object_box_result": object_box_result,
         "need_lane_change": step == 80,
         "lane_change_done": step == 160, 
         "approaching_intersection": step ==240,
@@ -46,14 +78,24 @@ def main():
     ylim = (-20.0, 20.0)
     bev_size = (900, 600)
 
-    # --- World (Day1 demo map points) ---
-    world_pts = make_demo_world_points()
+    # --- World ---
+    world_pts = make_pangyo_world_pts()
+    # world_pts = make_osm_world_pts()
+
+    world_pts_norm = {}
+    for name, items in world_pts.items():
+        polylines = normalize_items_to_polylines(items)
+        if len(polylines) > 0:
+            world_pts_norm[name] = polylines
 
     bev_dict = {}
-    for name, pts3 in world_pts.items():
-        bev_uv = world_xy_to_bev(pts3, xlim=xlim, ylim=ylim, bev_size=bev_size)
-        bev_uv = clip_bev(bev_uv, bev_size)
-        bev_dict[name] = bev_uv
+    for name, polylines in world_pts_norm.items():
+        bev_dict[name] = []
+        for pts3 in polylines:
+            bev_uv = world_xy_to_bev(pts3, xlim=xlim, ylim=ylim, bev_size=bev_size)
+            bev_uv = clip_bev(bev_uv, bev_size)
+            if len(bev_uv) > 0:
+                bev_dict[name].append(bev_uv)
 
     # --- planner ---
     planner = Planner()
@@ -79,7 +121,11 @@ def main():
     
     # map (world) 에 존재하는 장애물을 그대로 입력 받았다고 가정.
     obj_detection = world_pts.get("car_box", None)
-    obj_2d = np.mean(obj_detection, axis=0)[:2]
+    if obj_detection is not None:
+        obj_2d = np.mean(obj_detection, axis=0)[:2]
+    else:
+        obj_2d = None
+        
     for k in range(steps):
         perception = ideal_perception(state, obj_2d, k)
         drive_state, ref_path = planner.update(state, perception)
@@ -111,7 +157,7 @@ def main():
         ref_path_xy=ref_path,
         states=states,
         traj_xy_list=traj,
-        world_pts=world_pts,
+        world_pts=world_pts_norm,
         title="Dynamics & Control BEV Viewer"
     )
 if __name__ == "__main__":

@@ -22,6 +22,8 @@ def main():
 
     uv_dict = {}
     for name, pts in world_pts.items():
+        if len(pts) != 1: continue
+        
         uv, _ = project_pinhole(pts, T_cam_world, K)
         uv_dict[name] = uv
 

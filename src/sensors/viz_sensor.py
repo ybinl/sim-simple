@@ -36,7 +36,7 @@ def plot_bev(bev_dict, bev_size, xlim, ylim, ego_yaw=0.0):
     plt.ylabel("y [m] (left)")
 
     for k, uv in bev_dict.items():
-        plt.scatter(uv[:,0], uv[:,1], s=4, label=k)
+        plt.scatter(uv[:,0], uv[:,1], s=4)
 
     # ego 원점 표시 (x=0, y=0)
     ego_u = (0 - xlim[0]) / (xlim[1] - xlim[0]) * (W - 1)
