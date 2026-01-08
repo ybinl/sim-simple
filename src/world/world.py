@@ -342,7 +342,10 @@ def make_pangyo_world_pts(
         "stop_line": stop_line,
     }
 
+    dx = 10.0
+    dy = 0.0
     for k in list(world.keys()):
         world[k] = shift_pts(world[k], dx, dy)
         
     return world
+

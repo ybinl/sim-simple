@@ -206,8 +206,8 @@ def show_bev_viewer(
 
 
         # legend 중복 방지: 매 프레임 새로 갱신
-        if len(cam_artists) > 0:
-            ax_cam.legend(loc="upper right")
+        # if len(cam_artists) > 0:
+        #     ax_cam.legend(loc="upper right")
 
 
         ax.set_title(f"{title}  |  frame {i+1}/{len(states)}  |  v={s.v:.2f} m/s  yaw={np.rad2deg(s.yaw):.1f}°")
