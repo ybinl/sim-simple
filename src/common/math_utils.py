@@ -24,8 +24,8 @@ def rot_z(yaw):
         [0,  0, 1],
     ])
 
-def euler_zyx(yaw, pitch, roll):
-    return rot_z(yaw) @ rot_y(pitch) @ rot_x(roll)
+def euler_zyx(roll, yaw, pitch):
+    return rot_z(roll) @ rot_y(yaw) @ rot_x(pitch)
 
     # R = euler_zyx(yaw, pitch, roll) # R = 3 by 3 rotation matrix, pts(3d point 곱해서 사용하면 됨)
     # transformed_pts = R @ pts

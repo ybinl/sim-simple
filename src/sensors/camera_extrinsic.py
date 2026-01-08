@@ -13,10 +13,10 @@ def make_T_cam_world():
     t = np.array([1.5, 0.0, 1.3])
 
     # Optional: pitch down
-    pitch = np.deg2rad(-10.0)
-    yaw = np.deg2rad(20)
-    roll = np.deg2rad(5)
-    R_euler = euler_zyx(yaw, pitch, roll)
+    pitch = np.deg2rad(10.0)
+    yaw = np.deg2rad(0)
+    roll = np.deg2rad(0)
+    R_euler = euler_zyx(roll,yaw,pitch)
     
     # R_pitch = rot_z(pitch)
     # World -> Camera rotation
