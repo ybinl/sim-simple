@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Dict, List, Optional
+import matplotlib.pyplot as plt
 
 def make_demo_world_points():
     lane_width = 3.5
@@ -62,41 +63,25 @@ def shift_pts(items, dx, dy):
     return b
 
 def make_pangyo_world_pts(
-    area_half: float = 200.0,          # -> 전체 400m x 400m
-    intersection_half: float = 25.0,    # 교차로 중심부 반경(대략 50m x 50m 박스)
+    area_half: float = 200.0,          # 전체 400m x 400m
+    intersection_half: float = 25.0,   # 교차로 half-size (I)
     lane_width: float = 3.5,
-    lanes_each_dir: int = 2,           # 한 방향 차로 수 (예: 2면 왕복 4차로)
-    sample_step: float = 0.5,          # 직선 샘플링 간격(미터)
+    lanes_each_dir: int = 2,
+    sample_step: float = 0.5,
     z0: float = 0.0,
-    add_turn_guides: bool = True,      # 좌/우회전 가이드(곡선) centerline 추가
+    add_straight_connectors: bool = True,
+    add_right_lane_centers: bool = True,
+    dx: float = 0.0,
+    dy: float = 0.0,
 ) -> Dict[str, object]:
-    """
-    4-way 교차로(판교 느낌) 월드 포인트를 생성.
-    좌표계:
-      - 원점(0,0)이 교차로 중심
-      - +x: 동쪽, +y: 북쪽
-      - z는 평면 z0
 
-    Returns (기존과 호환):
-      {
-        "lane_center": List[np.ndarray],  # 각 polyline: (N,3)
-        "lane_left":   List[np.ndarray],
-        "lane_right":  List[np.ndarray],
-        "car_box":     np.ndarray | None, # (8,3)
-        "crosswalk":   List[np.ndarray],  # (M,3) 닫힌 폴리곤
-        "stop_line":   List[np.ndarray],  # (K,3) 짧은 선분 polyline
-      }
-    """
+    I = float(intersection_half)
 
     def _linspace_pts_1d(a: float, b: float, step: float) -> np.ndarray:
         n = max(2, int(np.ceil(abs(b - a) / step)) + 1)
         return np.linspace(a, b, n)
 
     def _make_straight_polyline(axis: str, s0: float, s1: float, offset: float) -> np.ndarray:
-        """
-        axis='x': x가 진행방향(동-서), y는 offset 고정
-        axis='y': y가 진행방향(남-북), x는 offset 고정
-        """
         ss = _linspace_pts_1d(s0, s1, sample_step)
         if axis == "x":
             x = ss
@@ -110,27 +95,13 @@ def make_pangyo_world_pts(
         return np.stack([x, y, z], axis=1)
 
     def _offset_boundary(poly: np.ndarray, normal_xy: np.ndarray, dist: float) -> np.ndarray:
-        # 직선 polyline 가정(이번 생성에서는 직선/원호 위주라 충분)
-        # normal_xy는 (2,) 방향 벡터(정규화되어있지 않아도 됨)
         n = normal_xy / (np.linalg.norm(normal_xy) + 1e-12)
         out = poly.copy()
         out[:, 0] += n[0] * dist
         out[:, 1] += n[1] * dist
         return out
 
-    def _make_box_polygon(cx: float, cy: float, hx: float, hy: float) -> np.ndarray:
-        # 닫힌 사각형(마지막 점 = 첫 점)
-        pts = np.array([
-            [cx - hx, cy - hy, z0],
-            [cx + hx, cy - hy, z0],
-            [cx + hx, cy + hy, z0],
-            [cx - hx, cy + hy, z0],
-            [cx - hx, cy - hy, z0],
-        ], dtype=float)
-        return pts
-
     def _make_arc(center: np.ndarray, r: float, th0: float, th1: float, step_m: float) -> np.ndarray:
-        # 원호 길이 기준으로 샘플 개수 결정
         arc_len = abs(th1 - th0) * r
         n = max(10, int(np.ceil(arc_len / step_m)) + 1)
         th = np.linspace(th0, th1, n)
@@ -139,213 +110,148 @@ def make_pangyo_world_pts(
         z = np.full_like(x, z0)
         return np.stack([x, y, z], axis=1)
 
+    # ---------------------------------------
+    # containers
+    # ---------------------------------------
     lane_center: List[np.ndarray] = []
     lane_left:   List[np.ndarray] = []
     lane_right:  List[np.ndarray] = []
 
+    # optional extra layers
     crosswalk: List[np.ndarray] = []
     stop_line: List[np.ndarray] = []
 
     # ---------------------------------------
-    # 1) 도로 기본 파라미터
+    # straight approaches (교차로 안은 비우고 접근로만)
     # ---------------------------------------
-    # 왕복 도로: 중심선 기준으로 한쪽(예: +y 방향 진행 lanes)과 반대쪽 lanes를 만들 것
-    # E-W 도로(진행방향 x): lane의 법선은 y축
-    # N-S 도로(진행방향 y): lane의 법선은 x축
-    road_half_width = lanes_each_dir * lane_width  # 중심선~도로 가장자리(차로만 고려)
+    x_w0, x_w1 = -area_half, -I
+    x_e0, x_e1 =  I,  area_half
+    y_s0, y_s1 = -area_half, -I
+    y_n0, y_n1 =  I,  area_half
 
-    # 직선 구간: 교차로 중심부는 비우고 approach만 생성
-    # 예) 서쪽 접근: x in [-area_half, -intersection_half], 동쪽 접근: [intersection_half, area_half]
-    x_w0, x_w1 = -area_half, -intersection_half
-    x_e0, x_e1 =  intersection_half,  area_half
-    y_s0, y_s1 = -area_half, -intersection_half
-    y_n0, y_n1 =  intersection_half,  area_half
+    offsets_one_side = (np.arange(lanes_each_dir) + 0.5) * lane_width  # 0.5W, 1.5W ...
 
-    # ---------------------------------------
-    # 2) E-W 도로 차선들 (진행방향: x)
-    #   - 위쪽(+y) : 동쪽(+x) 진행(가정)
-    #   - 아래쪽(-y): 서쪽(-x) 진행(가정)
-    # ---------------------------------------
-    # 차선 center offset: (0.5, 1.5, ...) * lane_width 형태로 배치
-    offsets_one_side = (np.arange(lanes_each_dir) + 0.5) * lane_width  # 1차선,2차선...
-
-    # +y측 차선들 (y = +offset)
+    # E-W (axis='x'): normal is +y
     for off in offsets_one_side:
-        # 서쪽 접근 + 동쪽 접근을 각각 polyline으로 만들고 둘 다 lane으로 넣음
-        c_w = _make_straight_polyline("x", x_w0, x_w1, +off)
-        c_e = _make_straight_polyline("x", x_e0, x_e1, +off)
-
-        for c in (c_w, c_e):
+        for c in (_make_straight_polyline("x", x_w0, x_w1, +off),
+                  _make_straight_polyline("x", x_e0, x_e1, +off),
+                  _make_straight_polyline("x", x_w0, x_w1, -off),
+                  _make_straight_polyline("x", x_e0, x_e1, -off)):
             lane_center.append(c)
-            # 진행방향 x인 lane의 left/right boundary는 +/- y
-            # 여기서 "left"는 polyline의 좌측(북쪽)으로 정의(일관성만 유지)
-            l = _offset_boundary(c, normal_xy=np.array([0.0, 1.0]), dist=+lane_width/2)
-            r = _offset_boundary(c, normal_xy=np.array([0.0, 1.0]), dist=-lane_width/2)
-            lane_left.append(l)
-            lane_right.append(r)
+            lane_left.append(_offset_boundary(c, np.array([0.0, 1.0]), +lane_width/2))
+            lane_right.append(_offset_boundary(c, np.array([0.0, 1.0]), -lane_width/2))
 
-    # -y측 차선들 (y = -offset)
+    # N-S (axis='y'): normal is +x
     for off in offsets_one_side:
-        c_w = _make_straight_polyline("x", x_w0, x_w1, -off)
-        c_e = _make_straight_polyline("x", x_e0, x_e1, -off)
-
-        for c in (c_w, c_e):
+        for c in (_make_straight_polyline("y", y_s0, y_s1, +off),
+                  _make_straight_polyline("y", y_n0, y_n1, +off),
+                  _make_straight_polyline("y", y_s0, y_s1, -off),
+                  _make_straight_polyline("y", y_n0, y_n1, -off)):
             lane_center.append(c)
-            l = _offset_boundary(c, normal_xy=np.array([0.0, 1.0]), dist=+lane_width/2)
-            r = _offset_boundary(c, normal_xy=np.array([0.0, 1.0]), dist=-lane_width/2)
-            lane_left.append(l)
-            lane_right.append(r)
+            lane_left.append(_offset_boundary(c, np.array([1.0, 0.0]), +lane_width/2))
+            lane_right.append(_offset_boundary(c, np.array([1.0, 0.0]), -lane_width/2))
 
     # ---------------------------------------
-    # 3) N-S 도로 차선들 (진행방향: y)
-    #   - 오른쪽(+x): 북쪽(+y) 진행(가정)
-    #   - 왼쪽(-x)  : 남쪽(-y) 진행(가정)
+    # (A) straight connectors inside intersection (gap 제거)
     # ---------------------------------------
-    for off in offsets_one_side:
-        # +x 측 차선들 (x=+off)
-        c_s = _make_straight_polyline("y", y_s0, y_s1, +off)
-        c_n = _make_straight_polyline("y", y_n0, y_n1, +off)
-
-        for c in (c_s, c_n):
+    if add_straight_connectors:
+        for off in offsets_one_side:
+            # Eastbound connector: y = -off, x from -I to +I
+            c = _make_straight_polyline("x", -I, +I, -off)
             lane_center.append(c)
-            # 진행방향 y인 lane의 left/right boundary는 +/- x
-            l = _offset_boundary(c, normal_xy=np.array([1.0, 0.0]), dist=+lane_width/2)
-            r = _offset_boundary(c, normal_xy=np.array([1.0, 0.0]), dist=-lane_width/2)
-            lane_left.append(l)
-            lane_right.append(r)
 
-    for off in offsets_one_side:
-        # -x 측 차선들 (x=-off)
-        c_s = _make_straight_polyline("y", y_s0, y_s1, -off)
-        c_n = _make_straight_polyline("y", y_n0, y_n1, -off)
-
-        for c in (c_s, c_n):
+            # Westbound connector: y = +off, x from +I to -I (방향은 상관없지만 보기 좋게)
+            c = _make_straight_polyline("x", +I, -I, +off)
             lane_center.append(c)
-            l = _offset_boundary(c, normal_xy=np.array([1.0, 0.0]), dist=+lane_width/2)
-            r = _offset_boundary(c, normal_xy=np.array([1.0, 0.0]), dist=-lane_width/2)
-            lane_left.append(l)
-            lane_right.append(r)
+
+            # Northbound connector: x = +off, y from -I to +I
+            c = _make_straight_polyline("y", -I, +I, +off)
+            lane_center.append(c)
+
+            # Southbound connector: x = -off, y from +I to -I
+            c = _make_straight_polyline("y", +I, -I, -off)
+            lane_center.append(c)
 
     # ---------------------------------------
-    # 4) 교차로 내부 회전(가이드) 차선(선택)
-    #    - 간단히 quarter-circle로 좌/우회전 가이드 생성
+    # (B) right-turn guides (Korea: right-hand traffic)
+    #  - 우회전은 "자기 차선 offset 유지"가 자연스럽게 이어짐
+    #  - 코너 중심: (±I, ±I), 반경 r = I - off  (off < I 이어야 함)
     # ---------------------------------------
-    if add_turn_guides:
-        # 회전 반경: 안쪽차선 기준으로 intersection_half - 여유
-        r = max(8.0, intersection_half - lane_width * 1.0)
+    if add_right_lane_centers:
+        for off in offsets_one_side:
+            r = I - off
+            if r <= 1.0:  # 너무 큰 off면(차로가 교차로보다 넓어짐) skip
+                continue
 
-        # 4개 코너에서 우회전(예시) 가이드
-        # (서->북), (북->동), (동->남), (남->서) 등
-        # center는 각 코너 근처로 잡고 90도 원호를 그림
-        # 서->북: 중심 (-intersection_half, +intersection_half)
-        c = _make_arc(center=np.array([-intersection_half, +intersection_half]),
-                      r=r, th0=-0.0*np.pi, th1=+0.5*np.pi, step_m=sample_step)
-        lane_center.append(c)
-        lane_left.append(_offset_boundary(c, np.array([-np.sin(0.25*np.pi), np.cos(0.25*np.pi)]), +lane_width/2))
-        lane_right.append(_offset_boundary(c, np.array([-np.sin(0.25*np.pi), np.cos(0.25*np.pi)]), -lane_width/2))
+            # 1) Eastbound -> Southbound (SW corner), center (-I, -I)
+            # start (-I, -off) -> end (-off, -I)
+            c = _make_arc(center=np.array([-I, -I], float), r=r,
+                          th0=np.pi/2, th1=0.0, step_m=sample_step)
+            lane_center.append(c)
 
-        # 북->동: 중심 (+intersection_half, +intersection_half)
-        c = _make_arc(center=np.array([+intersection_half, +intersection_half]),
-                      r=r, th0=+0.5*np.pi, th1=+0.0*np.pi, step_m=sample_step)
-        lane_center.append(c)
-        lane_left.append(_offset_boundary(c, np.array([1.0, 0.0]), +lane_width/2))
-        lane_right.append(_offset_boundary(c, np.array([1.0, 0.0]), -lane_width/2))
+            # 2) Northbound -> Eastbound (SE corner), center (+I, -I)
+            # start (+off, -I) -> end (+I, -off)
+            c = _make_arc(center=np.array([+I, -I], float), r=r,
+                          th0=np.pi, th1=np.pi/2, step_m=sample_step)
+            lane_center.append(c)
 
-        # 동->남: 중심 (+intersection_half, -intersection_half)
-        c = _make_arc(center=np.array([+intersection_half, -intersection_half]),
-                      r=r, th0=+1.0*np.pi, th1=+0.5*np.pi, step_m=sample_step)
-        lane_center.append(c)
-        lane_left.append(_offset_boundary(c, np.array([0.0, -1.0]), +lane_width/2))
-        lane_right.append(_offset_boundary(c, np.array([0.0, -1.0]), -lane_width/2))
+            # 3) Westbound -> Northbound (NE corner), center (+I, +I)
+            # start (+I, +off) -> end (+off, +I)
+            c = _make_arc(center=np.array([+I, +I], float), r=r,
+                          th0=-np.pi/2, th1=-np.pi, step_m=sample_step)
+            lane_center.append(c)
 
-        # 남->서: 중심 (-intersection_half, -intersection_half)
-        c = _make_arc(center=np.array([-intersection_half, -intersection_half]),
-                      r=r, th0=+1.5*np.pi, th1=+1.0*np.pi, step_m=sample_step)
-        lane_center.append(c)
-        lane_left.append(_offset_boundary(c, np.array([-1.0, 0.0]), +lane_width/2))
-        lane_right.append(_offset_boundary(c, np.array([-1.0, 0.0]), -lane_width/2))
+            # 4) Southbound -> Westbound (NW corner), center (-I, +I)
+            # start (-off, +I) -> end (-I, +off)
+            c = _make_arc(center=np.array([-I, +I], float), r=r,
+                          th0=0.0, th1=-np.pi/2, step_m=sample_step)
+            lane_center.append(c)
 
     # ---------------------------------------
-    # 5) 횡단보도 4개(사각형 폴리곤)
+    # stop lines (간단)
     # ---------------------------------------
-    # 횡단보도는 교차로 바깥쪽에 위치
-    cw_depth = 6.0  # 진행방향으로의 두께(미터)
-    cw_margin = 2.0 # 교차로 박스에서 살짝 띄우기
-    # 횡단보도 길이(차로 폭 + 여유). "도로를 가로지르는" 방향 길이
-    cw_length = 2.0 * (road_half_width + 4.0)
-
-    # 북쪽 횡단보도(동-서 방향으로 길게, y가 +쪽)
-    crosswalk.append(_make_box_polygon(
-        cx=0.0,
-        cy=intersection_half + cw_margin + cw_depth/2,
-        hx=cw_length/2,
-        hy=cw_depth/2
-    ))
-    # 남쪽
-    crosswalk.append(_make_box_polygon(
-        cx=0.0,
-        cy=-(intersection_half + cw_margin + cw_depth/2),
-        hx=cw_length/2,
-        hy=cw_depth/2
-    ))
-    # 동쪽 횡단보도(남-북 방향으로 길게, x가 +쪽)
-    crosswalk.append(_make_box_polygon(
-        cx=intersection_half + cw_margin + cw_depth/2,
-        cy=0.0,
-        hx=cw_depth/2,
-        hy=cw_length/2
-    ))
-    # 서쪽
-    crosswalk.append(_make_box_polygon(
-        cx=-(intersection_half + cw_margin + cw_depth/2),
-        cy=0.0,
-        hx=cw_depth/2,
-        hy=cw_length/2
-    ))
+    stop_len = 2.0 * (lanes_each_dir * lane_width + 1.0)
+    stop_line.append(np.array([[-I-1.5, -stop_len/2, z0], [-I-1.5, +stop_len/2, z0]]))
+    stop_line.append(np.array([[+I+1.5, -stop_len/2, z0], [+I+1.5, +stop_len/2, z0]]))
+    stop_line.append(np.array([[-stop_len/2, -I-1.5, z0], [+stop_len/2, -I-1.5, z0]]))
+    stop_line.append(np.array([[-stop_len/2, +I+1.5, z0], [+stop_len/2, +I+1.5, z0]]))
 
     # ---------------------------------------
-    # 6) 정지선(각 접근로에 1개씩)
+    # lead car (옵션)
     # ---------------------------------------
-    stop_len = 2.0 * (road_half_width + 1.0)
-    # 서쪽 접근(세로 정지선): x = -intersection_half - margin
-    x_sl = -intersection_half - 1.5
-    stop_line.append(np.array([[x_sl, -stop_len/2, z0], [x_sl, +stop_len/2, z0]]))
-    # 동쪽
-    x_sl = +intersection_half + 1.5
-    stop_line.append(np.array([[x_sl, -stop_len/2, z0], [x_sl, +stop_len/2, z0]]))
-    # 남쪽 접근(가로 정지선): y = -intersection_half - margin
-    y_sl = -intersection_half - 1.5
-    stop_line.append(np.array([[-stop_len/2, y_sl, z0], [+stop_len/2, y_sl, z0]]))
-    # 북쪽
-    y_sl = +intersection_half + 1.5
-    stop_line.append(np.array([[-stop_len/2, y_sl, z0], [+stop_len/2, y_sl, z0]]))
-
-    # ---------------------------------------
-    # 7) 선행차(예: 동쪽에서 서쪽으로 가는 차 1대)
-    # ---------------------------------------
-    # 아래(-y)쪽 차로 중 하나에 배치 (예: y = -(0.5*lane_width))
     car_center = np.array([+60.0, -(0.5 * lane_width), z0], dtype=float)
     L, W, H = 4.5, 2.0, 1.5
     box = []
     for dz in [0.0, H]:
-        for dx in [-L/2, L/2]:
-            for dy in [-W/2, W/2]:
-                box.append(car_center + np.array([dx, dy, dz], dtype=float))
+        for dx_ in [-L/2, L/2]:
+            for dy_ in [-W/2, W/2]:
+                box.append(car_center + np.array([dx_, dy_, dz], dtype=float))
     car_box = np.array(box, dtype=float)
 
     world = {
-        "lane_center": lane_center,  # List[np.ndarray]
+        "lane_center": lane_center,
         "lane_left": lane_left,
         "lane_right": lane_right,
-        "car_box": car_box,
-        "crosswalk": crosswalk,
         "stop_line": stop_line,
+        "car_box": car_box,
     }
 
-    dx = 10.0
-    dy = 0.0
+    # shift
+    dx=40.0
+    dy=0.0
     for k in list(world.keys()):
         world[k] = shift_pts(world[k], dx, dy)
-        
+
     return world
 
+if __name__ == "__main__":
+    world_pts = make_pangyo_world_pts()
+    
+    plt.figure()
+    for k,pts in world_pts.items():
+        if "lane_center" in k and pts is not None:
+            for line_ in pts:
+                plt.plot(line_[:,0], line_[:,1])
+                
+                
+    plt.show()

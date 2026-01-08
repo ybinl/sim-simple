@@ -75,7 +75,7 @@ def ideal_perception(state, object_box_result, step):
 def main():
     # --- BEV window bounds (meters) ---
     xlim = (-50.0, 100.0)
-    ylim = (-20.0, 20.0)
+    ylim = (-50.0, 50.0)
     bev_size = (900, 600)
 
     # --- World ---
