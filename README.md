@@ -27,6 +27,44 @@ Environment → Human(인지/판단/행동) → Environment
     Open-Loop Object-Level이 제일 쉬움
     해당 프로젝트는 성능은 매우 낮지만 Closed-Loop, Sensor-Level임
 
+### 프로젝트 folder structure 소개
+sim-simple/
+├── README.md
+├── main.py # 시뮬레이션 엔트리 포인트 (전체 파이프라인 실행)
+│
+├── src/
+│ ├── world/ # Map / World 모듈
+│ │ ├── world.py # 월드 포인트 및 기본 맵 생성
+│ │ └── osm_converter.py # OSM → polyline 변환
+│ │
+│ ├── sensors/ # Sensor / Perception 모듈
+│ │ ├── bev.py # BEV 변환 및 클리핑
+│ │ ├── camera_pinhole.py # 카메라 모델
+│ │ ├── camera_extrinsic.py # 차량의 센서 장착 위치
+│ │ └── perception.py # 인지 결과 통합
+│ │
+│ ├── planning/ # Path Planning 모듈
+│ │ ├── planner.py # 판단 모듈
+│ │ └── path.py # 기준 경로 생성
+│ │
+│ ├── dynamics/ # Control & Vehicle Dynamics 모듈
+│ │ ├── vehicle.py # 차량 상태 및 파라미터
+│ │ └── control.py # 제어기 (Pure Pursuit / PID 등)
+│ │
+│ ├── common/ # 공통 유틸리티
+│ ├── types.py # 공통 데이터 구조 정의
+│ └── math_utils.py # 행렬, 좌표, 보조 수학 함수
+│
+├── assets/ # 시뮬레이션 리소스
+│ ├── maps/ # 지도 데이터 (OSM 등)
+│ │ └── map.osm
+│ └── configs/ # 설정 파일
+│ └── sim.yaml
+│
+├── main_viewer.py # bev, sensor projection 시각화
+├── main_planning_control.py 메인 실행 파일 
+
+
 ## 2. 시뮬레이션과 현실 차이점
 
 Sim2Real Gap: 시뮬레이터가 아무리 좋아도 현실의 “빛/그림자/반사(photorealism), 센서 노이즈, 재질, 날씨, 동적 에이전트” 등을 완벽히 재현하기는 어렵다.
